@@ -1,0 +1,128 @@
+{% extends 'base.html' %}
+{% block title %}{{ event.title }}{% endblock %}
+{% block content %}
+<div class="guest-shell">
+  <div class="hero card">
+    <div class="eyebrow">GUESTDROP · POWERED BY IMMICH</div>
+    <h1>{{ event.title }}</h1>
+    <p>{{ event.welcome or 'Share your photos and videos with us.' }}</p>
+    {% if asset_count is not none %}<div class="album-count"><b id="album-count">{{ asset_count }}</b> photos &amp; videos in the album</div>{% endif %}
+    {% if event.active %}
+    <label class="button primary big" for="file-picker">Add photos & videos</label>
+    <input id="file-picker" type="file" accept="image/*,video/*" multiple hidden>
+    <div class="muted small upload-note">Large files upload in resumable chunks. Completed items are added to the album immediately.</div>
+    {% else %}
+    <div class="flash error">Uploads are currently closed for this event.</div>
+    {% endif %}
+    {% if event.share_url %}<a class="button big album-button" target="_blank" rel="noopener" href="{{ event.share_url }}">View everyone’s photos</a>{% endif %}
+  </div>
+  <div id="queue" class="queue"></div>
+  <div id="summary" class="summary muted"></div>
+</div>
+<script>
+const EVENT_TOKEN = {{ event.token|tojson }};
+const CHUNK_SIZE = {{ chunk_size }};
+const picker = document.getElementById('file-picker');
+const queueEl = document.getElementById('queue');
+const summaryEl = document.getElementById('summary');
+let jobs = [];
+let running = 0;
+const MAX_PARALLEL = 1;
+
+function human(n){ const u=['B','KB','MB','GB']; let i=0; while(n>=1024&&i<u.length-1){n/=1024;i++;} return `${n.toFixed(i?1:0)} ${u[i]}`; }
+function fingerprint(file){ return `${file.name}|${file.size}|${file.lastModified}`; }
+function makeCard(file){
+  const el=document.createElement('div'); el.className='card upload-card';
+  el.innerHTML=`<div class="row between gap"><div class="truncate"><b></b><div class="muted size"></div></div><div class="status badge">Waiting</div></div><div class="progress"><div></div></div><div class="small muted detail"></div>`;
+  el.querySelector('b').textContent=file.name; el.querySelector('.size').textContent=human(file.size); queueEl.appendChild(el); return el;
+}
+function setState(job,text,pct,kind=''){
+  job.el.querySelector('.status').textContent=text; job.el.querySelector('.status').className='status badge '+kind;
+  job.el.querySelector('.progress div').style.width=`${Math.max(0,Math.min(100,pct))}%`;
+  if(text==='Saved') job.el.querySelector('.detail').textContent='Added to the Immich album';
+  else if(pct>=100) job.el.querySelector('.detail').textContent='Upload complete · saving to album…';
+  else job.el.querySelector('.detail').textContent=pct<1&&job.file?`${human(job.file.size*pct/100)} of ${human(job.file.size)} uploaded`:`${Math.round(pct)}% uploaded`;
+  refreshSummary();
+}
+function refreshSummary(){
+  const done=jobs.filter(j=>j.done).length, failed=jobs.filter(j=>j.failed).length;
+  summaryEl.textContent = jobs.length ? `${done} of ${jobs.length} saved${failed?` · ${failed} need retry`:''}` : '';
+}
+async function sleep(ms){return new Promise(r=>setTimeout(r,ms));}
+function uploadChunk(id,offset,blob,onProgress){
+  return new Promise((resolve,reject)=>{
+    const xhr=new XMLHttpRequest();
+    xhr.open('POST',`/api/uploads/${id}/chunk?offset=${offset}`);
+    xhr.setRequestHeader('Content-Type','application/octet-stream');
+    // Mobile uploads can take several minutes per chunk. Keep the request alive;
+    // progress events still show that data is moving.
+    xhr.timeout=0;
+    xhr.upload.onprogress=e=>{if(e.lengthComputable)onProgress(e.loaded);};
+    xhr.onload=()=>{
+      let body={};
+      try{body=JSON.parse(xhr.responseText||'{}');}catch(e){}
+      resolve({ok:xhr.status>=200&&xhr.status<300,status:xhr.status,body});
+    };
+    xhr.onerror=()=>reject(new Error('Network connection interrupted'));
+    xhr.ontimeout=()=>reject(new Error('Upload request timed out'));
+    xhr.onabort=()=>reject(new Error('Upload was interrupted'));
+    xhr.send(blob);
+  });
+}
+async function readServerOffset(id){
+  const r=await fetch(`/api/uploads/${id}`,{cache:'no-store'});
+  if(!r.ok)throw new Error('Could not resume upload');
+  return r.json();
+}
+async function refreshAlbumCount(){const el=document.getElementById('album-count'); if(!el)return; try{const r=await fetch(`/api/events/${EVENT_TOKEN}/status`); if(!r.ok)return; const s=await r.json(); if(Number.isInteger(s.albumAssetCount))el.textContent=s.albumAssetCount;}catch(e){}}
+async function waitForImport(job,id){
+  for(let i=0;i<1800;i++){
+    const r=await fetch(`/api/uploads/${id}`); if(!r.ok) throw new Error('Could not read upload status');
+    const s=await r.json();
+    if(s.status==='complete'){job.done=true; setState(job,'Saved',100,'ok'); refreshAlbumCount(); return;}
+    if(s.status==='error') throw new Error(s.error||'Immich import failed');
+    setState(job, s.status==='importing'?'Adding to album…':'Processing…',100);
+    await sleep(1000);
+  }
+  throw new Error('Timed out while waiting for Immich import');
+}
+async function runJob(job){
+  const f=job.file;
+  try{
+    job.failed=false; setState(job,'Starting',0);
+    let r=await fetch(`/api/events/${EVENT_TOKEN}/uploads`, {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({name:f.name,size:f.size,type:f.type,lastModified:f.lastModified,fingerprint:fingerprint(f)})});
+    let info=await r.json(); if(!r.ok) throw new Error(info.error||'Could not start upload');
+    const id=info.id;
+    if(info.status==='complete'){job.done=true; setState(job,'Saved',100,'ok'); return;}
+    let offset=info.received||0;
+    if(offset>0)setState(job,'Resuming',offset/f.size*100);
+    let failures=0;
+    while(offset<f.size){
+      const end=Math.min(offset+CHUNK_SIZE,f.size), blob=f.slice(offset,end);
+      try{
+        const result=await uploadChunk(id,offset,blob,loaded=>setState(job,'Uploading',(offset+loaded)/f.size*100));
+        info=result.body;
+        if(result.status===409 && typeof info.received==='number'){offset=info.received; failures=0; continue;}
+        if(!result.ok)throw new Error(info.error||`Chunk upload failed (${result.status})`);
+        offset=info.received; failures=0; setState(job,'Uploading',offset/f.size*100);
+      }catch(err){
+        failures++;
+        if(failures>4)throw err;
+        setState(job,`Reconnecting (${failures}/4)`,offset/f.size*100);
+        await sleep(1000*Math.pow(2,failures-1));
+        let status;
+        try{status=await readServerOffset(id);}catch(e){continue;}
+        if(status.status==='complete'){job.done=true;setState(job,'Saved',100,'ok');return;}
+        if(status.status==='ready'||status.status==='importing'){await waitForImport(job,id);return;}
+        if(typeof status.received==='number')offset=status.received;
+      }
+    }
+    await waitForImport(job,id);
+  }catch(err){ job.failed=true; job.started=false; setState(job,'Retry needed',parseFloat(job.el.querySelector('.progress div').style.width)||0,'bad'); job.el.querySelector('.detail').textContent=err.message; addRetry(job); }
+  finally{ running--; pump(); }
+}
+function addRetry(job){if(job.el.querySelector('.retry'))return; const b=document.createElement('button'); b.className='button retry'; b.textContent='Retry'; b.onclick=()=>{b.remove(); job.started=false; job.failed=false; pump();}; job.el.appendChild(b);}
+function pump(){ while(running<MAX_PARALLEL){ const job=jobs.find(j=>!j.started&&!j.done&&!j.failed); if(!job)break; job.started=true; running++; runJob(job); } refreshSummary(); }
+if(picker){ picker.addEventListener('change',()=>{ for(const f of picker.files){ const job={file:f,el:makeCard(f),started:false,done:false,failed:false}; jobs.push(job);} picker.value=''; pump(); }); }
+</script>
+{% endblock %}

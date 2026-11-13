@@ -1,0 +1,38 @@
+{% extends 'base.html' %}
+{% block title %}New Event{% endblock %}
+{% block content %}
+<div class="page-head"><div><div class="eyebrow">NEW GUESTDROP</div><h1>Create an event</h1><p class="muted">Choose an Immich album, then GuestDrop creates the upload page and QR.</p></div></div>
+{% if error %}<div class="flash error">{{ error }}</div>{% endif %}
+<div class="card form-card">
+<form method="post" class="stack" id="event-form">
+  <input type="hidden" name="csrf" value="{{ csrf_token() }}">
+  <label>Event name<input id="title" name="title" required placeholder="Josh & Cody's Wedding"></label>
+  <label>Welcome message<textarea name="welcome" rows="3" placeholder="Share your photos and videos with us!"></textarea></label>
+  <fieldset><legend>Immich album</legend>
+    <label class="radio"><input type="radio" name="album_mode" value="existing" checked> Use an existing album</label>
+    <select id="album_id" name="album_id">
+      {% for album in albums %}<option value="{{ album.id }}" data-name="{{ album.albumName }}">{{ album.albumName }}</option>{% endfor %}
+    </select>
+    <label class="radio"><input type="radio" name="album_mode" value="new"> Create a new album</label>
+    <input id="new_album_name" name="new_album_name" placeholder="Album name (defaults to event name)">
+  </fieldset>
+  <label>Guest link ending
+    <div class="slug-input"><span>{{ public_base }}/</span><input id="slug" name="slug" required placeholder="josh-cody-wedding"></div>
+    <small class="muted">Defaults to the selected/new Immich album name. You can shorten it before creating the event.</small>
+  </label>
+  <label class="check"><input type="checkbox" name="make_share" checked> Automatically create a view-only Immich album link</label>
+  <label>Or existing Immich share URL<input name="share_url" placeholder="https://photos.example.com/share/..."></label>
+  <div class="hint">GuestDrop uploads with its API key. The Immich public share is deliberately view-only so guests see only one upload button.</div>
+  <div class="actions"><button class="primary" type="submit">Create GuestDrop</button><a class="button" href="{{ url_for('admin_index') }}">Cancel</a></div>
+</form>
+</div>
+<script>
+const slugEl=document.getElementById('slug'), titleEl=document.getElementById('title'), albumEl=document.getElementById('album_id'), newAlbumEl=document.getElementById('new_album_name');
+let slugTouched=false;
+function slugify(s){return (s||'').toLowerCase().replace(/&/g,' and ').replace(/[^a-z0-9]+/g,'-').replace(/^-+|-+$/g,'').replace(/-+/g,'-').slice(0,80)}
+function albumMode(){return document.querySelector('input[name="album_mode"]:checked').value}
+function suggested(){if(albumMode()==='new') return newAlbumEl.value.trim()||titleEl.value.trim(); const opt=albumEl.options[albumEl.selectedIndex]; return opt?opt.dataset.name:titleEl.value.trim();}
+function updateSlug(){if(!slugTouched) slugEl.value=slugify(suggested());}
+slugEl.addEventListener('input',()=>slugTouched=true); titleEl.addEventListener('input',updateSlug); albumEl.addEventListener('change',updateSlug); newAlbumEl.addEventListener('input',updateSlug); document.querySelectorAll('input[name="album_mode"]').forEach(x=>x.addEventListener('change',updateSlug)); updateSlug();
+</script>
+{% endblock %}

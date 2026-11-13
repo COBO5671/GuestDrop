@@ -1,0 +1,20 @@
+{% extends 'base.html' %}
+{% block title %}Edit {{ event.title }}{% endblock %}
+{% block content %}
+<div class="page-head"><div><div class="eyebrow">EDIT GUESTDROP</div><h1>{{ event.title }}</h1><p class="muted">The Immich album mapping stays fixed; these settings control the guest-facing page.</p></div></div>
+{% if error %}<div class="flash error">{{ error }}</div>{% endif %}
+<div class="card form-card">
+<form method="post" class="stack">
+  <input type="hidden" name="csrf" value="{{ csrf_token() }}">
+  <label>Event name<input name="title" required value="{{ event.title }}"></label>
+  <label>Welcome message<textarea name="welcome" rows="3">{{ event.welcome }}</textarea></label>
+  <label>Guest link ending
+    <div class="slug-input"><span>{{ public_base }}/</span><input name="slug" required value="{{ event.slug }}"></div>
+    <small class="muted">Changing this changes the QR destination. Existing printed QR codes will continue to point at the old link only if you leave this unchanged.</small>
+  </label>
+  <label>Immich view-only share URL<input name="share_url" value="{{ event.share_url }}" placeholder="https://photos.example.com/share/..."></label>
+  <div class="hint">Mapped Immich album: <b>{{ event.album_name }}</b></div>
+  <div class="actions"><button class="primary" type="submit">Save changes</button><a class="button" href="{{ url_for('admin_event_detail', event_id=event.id) }}">Cancel</a></div>
+</form>
+</div>
+{% endblock %}

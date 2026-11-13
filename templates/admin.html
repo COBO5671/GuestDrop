@@ -1,0 +1,29 @@
+{% extends 'base.html' %}
+{% block title %}Events{% endblock %}
+{% block content %}
+<div class="page-head">
+  <div><div class="eyebrow">GUESTDROP</div><h1>Events</h1><p class="muted">Each guest link maps to one Immich album.</p></div>
+  <a class="button primary" href="{{ url_for('admin_new_event') }}">+ New event</a>
+</div>
+{% if not events %}
+<div class="card empty"><h2>No events yet</h2><p>Create one, choose an Immich album, then share one GuestDrop link or QR code.</p></div>
+{% endif %}
+<div class="grid">
+{% for e, counts in events %}
+  <div class="card event-card">
+    <div class="row between gap"><div><h2>{{ e.title }}</h2><div class="muted">Immich: {{ e.album_name }}</div></div><span class="badge {{ 'ok' if e.active else 'off' }}">{{ 'Active' if e.active else 'Disabled' }}</span></div>
+    <code class="urlbox compact">{{ public_base }}/{{ e.slug }}</code>
+    <div class="stats"><span><b>{{ counts.get('complete',0) }}</b> saved</span><span><b>{{ counts.get('uploading',0) + counts.get('ready',0) + counts.get('importing',0) }}</b> in progress</span><span><b>{{ counts.get('error',0) }}</b> errors</span></div>
+    <div class="actions">
+      <a class="button" href="{{ url_for('admin_event_detail', event_id=e.id) }}">Manage</a>
+      <a class="button" target="_blank" href="{{ public_base }}/{{ e.slug }}">Open</a>
+      <a class="button" href="{{ url_for('admin_event_qr', event_id=e.id, fmt='png', download=1) }}">Download QR</a>
+      <form method="post" action="{{ url_for('admin_toggle_event', event_id=e.id) }}">
+        <input type="hidden" name="csrf" value="{{ csrf_token() }}">
+        <button class="button {{ 'danger' if e.active else '' }}" type="submit">{{ 'Disable' if e.active else 'Enable' }}</button>
+      </form>
+    </div>
+  </div>
+{% endfor %}
+</div>
+{% endblock %}

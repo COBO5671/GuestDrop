@@ -1,0 +1,12 @@
+{% extends 'base.html' %}
+{% block title %}Setup{% endblock %}
+{% block content %}
+<div class="page-head"><div><div class="eyebrow">SYSTEM</div><h1>Setup status</h1><p class="muted">Values come from your container environment.</p></div></div>
+<div class="setup-grid">
+  <div class="card"><h2>GuestDrop public URL</h2><code class="urlbox">{{ public_url }}</code><span class="badge {{ 'ok' if public_url.startswith('https://') else '' }}">{{ 'HTTPS configured' if public_url.startswith('https://') else 'Local/testing URL' }}</span></div>
+  <div class="card"><h2>Immich connection</h2><code class="urlbox">{{ immich_url }}</code>{% if immich_ok %}<span class="badge ok">Connected · {{ album_count }} albums visible</span>{% else %}<span class="badge bad">Connection failed</span><p class="error-cell">{{ immich_error }}</p>{% endif %}</div>
+  <div class="card"><h2>Immich public URL</h2><code class="urlbox">{{ immich_public_url or 'Not configured' }}</code><p class="muted small">Used to build the View Everyone’s Photos link.</p></div>
+  <div class="card"><h2>Chunk size</h2><div class="metric">{{ chunk_size_mb }} MB</div><p class="muted small">Each browser request stays below Cloudflare’s request-size ceiling.</p></div>
+</div>
+<p class="muted small">Change these values in <code>.env</code>, then restart the GuestDrop container.</p>
+{% endblock %}
